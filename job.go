@@ -85,7 +85,7 @@ func (c *JobContext) Room() *lksdk.Room {
 	return c.room
 }
 
-func (c *JobContext) Connect() (*lksdk.Room, error) {
+func (c *JobContext) Connect(callbacks ...*lksdk.RoomCallback) (*lksdk.Room, error) {
 	c.mu.Lock()
 	if c.room != nil {
 		room := c.room
@@ -94,9 +94,19 @@ func (c *JobContext) Connect() (*lksdk.Room, error) {
 	}
 	c.mu.Unlock()
 
-	room, err := lksdk.ConnectToRoomWithToken(c.url, c.token, &lksdk.RoomCallback{
-		OnDisconnected: func() { c.Shutdown() },
-	})
+	cb := lksdk.NewRoomCallback()
+	for _, extra := range callbacks {
+		cb.Merge(extra)
+	}
+	userDisconnect := cb.OnDisconnected
+	cb.OnDisconnected = func() {
+		if userDisconnect != nil {
+			userDisconnect()
+		}
+		c.Shutdown()
+	}
+
+	room, err := lksdk.ConnectToRoomWithToken(c.url, c.token, cb)
 	if err != nil {
 		return nil, fmt.Errorf("agents: connect to room: %w", err)
 	}
