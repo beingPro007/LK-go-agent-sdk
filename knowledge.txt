@@ -1,0 +1,240 @@
+================================================================================
+LIVEKIT GO AGENT SDK — STUDY GUIDE
+================================================================================
+Read top to bottom. Each stage maps to a build phase of our SDK.
+Tip: every docs.livekit.io page also exists as clean markdown — append .md
+to the path (e.g. .../lifecycle.md) for a distraction-free read.
+
+
+--------------------------------------------------------------------------------
+STAGE 1 — PLATFORM FUNDAMENTALS (know the ground we stand on)
+--------------------------------------------------------------------------------
+Goal: be fluent in rooms / participants / tracks / tokens. The agent is just
+a participant with a special way of being summoned.
+
+1. Rooms, participants, tracks — core building blocks
+   https://docs.livekit.io/intro/basics/rooms-participants-tracks/
+   Focus: participant identity, track publish/subscribe model.
+
+2. Room management (server-side)
+   https://docs.livekit.io/intro/basics/rooms-participants-tracks/rooms/
+   Focus: room creation is what triggers automatic agent dispatch.
+
+3. Tokens & grants
+   https://docs.livekit.io/frontends/reference/tokens-grants.md
+   Focus: grant structure — our worker authenticates with an "agent" grant,
+   and each JobAssignment carries a ready-made room token.
+
+4. Track management
+   https://docs.livekit.io/intro/basics/rooms-participants-tracks/tracks/
+   Focus: TrackPublication vs Track, subscription model — needed for audio.
+
+
+--------------------------------------------------------------------------------
+STAGE 2 — THE AGENTS FRAMEWORK, CONCEPTUALLY (what we are porting)
+--------------------------------------------------------------------------------
+Goal: understand the lifecycle end-to-end before reading a single line of code.
+This stage IS our Phase 1–3 spec.
+
+5. Server lifecycle (worker registration -> job request -> job)
+   https://docs.livekit.io/agents/server/lifecycle.md
+   Focus: THE core document. Registration, availability, load reporting,
+   drain. Read twice.
+
+6. Job lifecycle (entrypoint, JobContext, shutdown)
+   https://docs.livekit.io/agents/server/job.md
+   Focus: entrypoint contract, ctx.connect(), shutdown callbacks,
+   delete_room_on_close. This defines our job.go public API.
+
+7. Agent dispatch (automatic vs explicit, agent_name)
+   https://docs.livekit.io/agents/server/agent-dispatch.md
+   Focus: agent_name semantics — empty means automatic dispatch on room
+   creation; set means explicit dispatch only. Job metadata.
+
+8. Agent dispatch service API
+   https://docs.livekit.io/reference/agents/agent-dispatch-service-api.md
+   Focus: how backends explicitly dispatch — we use this to TEST our worker.
+
+9. Server options (WorkerOptions equivalent)
+   https://docs.livekit.io/agents/server/options.md
+   Focus: every option here is a field in our Go WorkerOptions struct.
+
+10. Startup modes (dev / start / simulation)
+    https://docs.livekit.io/agents/server/startup-modes.md
+    Focus: what our cli/ package must provide.
+
+
+--------------------------------------------------------------------------------
+STAGE 3 — THE WIRE PROTOCOL (what the worker actually speaks)
+--------------------------------------------------------------------------------
+Goal: know every message on the worker <-> server WebSocket. This is the
+exact contract worker.go implements.
+
+11. livekit_agent.proto — Job, JobType, JobStatus, WorkerStatus, dispatch types
+    https://github.com/livekit/protocol/blob/main/protobufs/livekit_agent.proto
+    Focus: WorkerMessage / ServerMessage oneofs: Register, Availability,
+    JobAssignment, JobTermination, UpdateJobStatus, Ping/Pong.
+
+12. livekit_agent_worker.proto — newer worker protocol definitions
+    https://github.com/livekit/protocol/blob/main/protobufs/livekit_agent_worker.proto
+    Focus: compare with livekit_agent.proto; note what current servers use.
+
+13. livekit_agent_dispatch.proto — explicit dispatch API
+    https://github.com/livekit/protocol/blob/main/protobufs/livekit_agent_dispatch.proto
+    Focus: CreateAgentDispatchRequest — metadata flows from here to the job.
+
+14. Generated Go types (no codegen needed on our side — already published)
+    https://pkg.go.dev/github.com/livekit/protocol/livekit
+    Focus: find the agent messages from #11 as ready Go structs.
+
+15. Agent helper package used by the LiveKit server itself
+    https://pkg.go.dev/github.com/livekit/protocol/agent
+    Focus: protocol version constants, job type helpers.
+
+
+--------------------------------------------------------------------------------
+STAGE 4 — OUR GO BUILDING BLOCKS (what we build on)
+--------------------------------------------------------------------------------
+Goal: know exactly what server-sdk-go gives us for free, so we never
+reimplement it.
+
+16. server-sdk-go repo (README end to end)
+    https://github.com/livekit/server-sdk-go
+    Focus: ConnectToRoom, callbacks, publishing/subscribing tracks,
+    data channels, AgentDispatchClient.
+
+17. server-sdk-go v2 API reference
+    https://pkg.go.dev/github.com/livekit/server-sdk-go/v2
+    Focus: Room, LocalParticipant, RemoteParticipant, track types,
+    sample providers (audio publish path).
+
+18. livekit server repo (run it locally — our test bench)
+    https://github.com/livekit/livekit
+    Focus: just the README "getting started" — run with --dev flag,
+    default devkey/secret. Every phase gets verified against this.
+
+
+--------------------------------------------------------------------------------
+STAGE 5 — REFERENCE IMPLEMENTATIONS, SOURCE LEVEL (how they built it)
+--------------------------------------------------------------------------------
+Goal: read the Python source we are porting. Read in this exact order —
+it is dependency order, same as our build order.
+
+19. worker.py — the whole worker protocol client in one file
+    https://github.com/livekit/agents/blob/main/livekit-agents/livekit/agents/worker.py
+    Focus: connection loop, reconnect/backoff, availability handling,
+    load calc, drain. Our worker.go is this file, in Go idiom.
+
+20. job.py — JobContext, JobProcess, JobRequest
+    https://github.com/livekit/agents/blob/main/livekit-agents/livekit/agents/job.py
+    Focus: the public API surface users touch. Shutdown callback semantics.
+
+21. ipc/ — process pool (we replace this with goroutines; skim only)
+    https://github.com/livekit/agents/tree/main/livekit-agents/livekit/agents/ipc
+    Focus: understand WHAT it guarantees (isolation, prewarm, health),
+    so our goroutine runner guarantees the same. Do not port it.
+
+22. cli/ — dev/start commands
+    https://github.com/livekit/agents/tree/main/livekit-agents/livekit/agents/cli
+    Focus: env vars, log setup, hot-reload behavior in dev mode.
+
+23. agents-js — the Node port (proof this is portable; their design choices)
+    https://github.com/livekit/agents-js
+    Focus: how they translated Python idioms to another language —
+    the same exercise we are doing. Note what they simplified.
+
+24. Community Go attempt (what NOT to do — study its clutter, keep the lessons)
+    https://github.com/am-sokolov/livekit-agent-sdk-go
+    Focus: it proves protocol v1 works from Go. Note its worker/job
+    handling; notice the missing plugin/voice layers and the API noise.
+
+
+--------------------------------------------------------------------------------
+STAGE 6 — AUDIO + AI PLUGIN LAYER (build phases 4–6)
+--------------------------------------------------------------------------------
+Goal: understand the media path and the vendor-neutral interfaces before
+designing stt/ tts/ llm/ vad/ in Go.
+
+25. STT model/plugin overview
+    https://docs.livekit.io/agents/models/stt.md
+    Focus: streaming recognition, interim vs final events — shapes our
+    stt.Stream channel API.
+
+26. TTS model/plugin overview
+    https://docs.livekit.io/agents/models/tts.md
+    Focus: streamed synthesis and sentence tokenization interplay.
+
+27. LLM model/plugin overview
+    https://docs.livekit.io/agents/models/llm.md
+    Focus: ChatContext, streaming deltas, tool/function calling contract.
+
+28. VAD & Silero plugin
+    https://docs.livekit.io/agents/logic/turns/vad.md
+    Focus: VAD event model (start/end of speech, probabilities) — we port
+    this to ONNX runtime in Go.
+
+29. Plugin source tree (pick openai + deepgram, read one STT and one TTS)
+    https://github.com/livekit/agents/tree/main/livekit-plugins
+    Focus: how a plugin adapts a vendor WebSocket API to the base
+    interface — our plugins/ modules follow the same pattern.
+
+
+--------------------------------------------------------------------------------
+STAGE 7 — THE VOICE PIPELINE / AGENTSESSION (build phase 7, the crown jewel)
+--------------------------------------------------------------------------------
+Goal: the orchestration layer. Study only after stages 1–6 feel natural.
+
+30. Agent sessions (AgentSession usage)
+    https://docs.livekit.io/agents/logic/sessions.md
+    Focus: the public API: session.start, Agent definition, events.
+
+31. Pipeline nodes & hooks
+    https://docs.livekit.io/agents/logic/nodes.md
+    Focus: the customization points (stt_node, llm_node, tts_node) —
+    these become interface methods / func fields in Go.
+
+32. Pipeline types (STT->LLM->TTS vs realtime models)
+    https://docs.livekit.io/agents/models/pipelines.md
+    Focus: keep our abstractions realtime-model-ready even though we
+    build the classic pipeline first.
+
+33. Turn detection & endpointing
+    https://docs.livekit.io/agents/logic/turns/turn-detector.md
+    https://docs.livekit.io/agents/logic/turns/tuning.md
+    Focus: endpointing delays, interruption rules, preemptive generation.
+
+34. voice/ source — read in this order:
+    https://github.com/livekit/agents/tree/main/livekit-agents/livekit/agents/voice
+      a. io.py               (audio/text input-output abstractions)
+      b. events.py           (session event types)
+      c. agent.py            (Agent: instructions, tools, node overrides)
+      d. speech_handle.py    (a single agent utterance, interruption unit)
+      e. audio_recognition.py(VAD+STT+turn detection fusion)
+      f. agent_activity.py   (per-agent pipeline runtime — the hard one)
+      g. agent_session.py    (top-level orchestrator)
+      h. room_io/            (bridge between session and the LiveKit room)
+
+
+--------------------------------------------------------------------------------
+STAGE 8 — SUPPLEMENTARY (optional, when stuck)
+--------------------------------------------------------------------------------
+35. DeepWiki: livekit/agents architecture walkthroughs (AI-generated, verify
+    against source, but good mental maps)
+    https://deepwiki.com/livekit/agents
+    https://deepwiki.com/livekit/agents/2.1-agentserver-and-job-management
+    https://deepwiki.com/livekit/agents/2.2-worker-system
+
+36. Node agents docs (second angle on the same concepts)
+    https://docs.livekit.io/reference/agents-js/
+
+
+================================================================================
+STUDY -> BUILD MAP
+  Stage 1–2  -> before Phase 1 (worker.go)          [required]
+  Stage 3    -> during Phase 1 (worker.go)          [required]
+  Stage 4    -> before Phase 2 (job.go)             [required]
+  Stage 5    -> during Phase 2–3 (job.go, cli/)     [required]
+  Stage 6    -> before Phase 4–6 (audio, plugins)   [required later]
+  Stage 7    -> before Phase 7 (voice/)             [required later]
+  Stage 8    -> anytime                             [optional]
+================================================================================
