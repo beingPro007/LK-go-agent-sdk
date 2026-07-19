@@ -261,6 +261,8 @@ func (w *Worker) writeLoop(ctx context.Context, conn *websocket.Conn) error {
 	}
 }
 
+
+// this is the readloop which receives the message and will be the starting point for the worker to handle the message and take action based on the message type. The readloop will continuously read messages from the websocket connection and handle them accordingly.
 func (w *Worker) readLoop(conn *websocket.Conn) error {
 	for {
 		msgType, data, err := conn.ReadMessage()

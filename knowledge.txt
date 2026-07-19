@@ -6,6 +6,73 @@ Tip: every docs.livekit.io page also exists as clean markdown — append .md
 to the path (e.g. .../lifecycle.md) for a distraction-free read.
 
 
+================================================================================
+PROJECT STATUS  (snapshot: 2026-07-19)
+================================================================================
+Legend:  [x] done   [~] partial   [ ] not started
+
+The transport/lifecycle foundation is DONE and builds clean (`go build ./...`).
+The AgentSession / voice pipeline — the whole reason for the SDK — is NOT
+STARTED. Everything in Phases 4–7 below is greenfield. The `wip: agent session`
+commit was the echo example + WaitForParticipant, NOT the session layer.
+
+--- DONE ---------------------------------------------------------------------
+Phase 1 — Worker protocol  [x]   file: worker.go
+  [x] WebSocket connect, agent-JWT auth, http/https->ws/wss URL rewrite
+  [x] Register + RegisterResponse (worker id, server info)
+  [x] Availability handling (RequestFnc, Accept/Reject, assign timeout)
+  [x] JobAssignment -> spawn job goroutine
+  [x] JobTermination handling
+  [x] Load reporting + status loop, WorkerStatus available/full
+  [x] Ping/Pong keepalive
+  [x] Reconnect with exponential backoff
+  [x] Drain (graceful, waits for active jobs, cancels on timeout)
+
+Phase 2 — Job lifecycle  [~]   file: job.go
+  [x] JobContext: Context/Done/Job/Room
+  [x] Connect() via lksdk.ConnectToRoomWithToken, OnDisconnected -> Shutdown
+  [x] WaitForParticipant, AddShutdownCallback, Shutdown
+  [x] JobRequest: Accept(JobAcceptInfo)/Reject
+  [ ] delete_room_on_close option
+  [ ] Explicit-dispatch job metadata helpers (ctx.job.Metadata surface)
+  [ ] JobProcess / prewarm equivalent (userdata carried into entrypoint)
+
+Phase 3 — CLI  [~]   file: cli/cli.go
+  [x] `dev` (debug logs, local devkey defaults) and `start` (JSON logs)
+  [x] Signal handling -> drain, double-signal force-exit
+  [x] HTTP health endpoint (worker id, active jobs)
+  [ ] simulation mode / `connect` subcommand for local testing
+  [ ] hot-reload in dev mode
+  [ ] download-files / plugin warmup hooks
+
+--- NOT STARTED (this is the remaining work) ---------------------------------
+Phase 4 — Audio primitives  [ ]   package: audio/
+  [ ] AudioFrame type, ring buffer, resampling, byte<->sample helpers
+  [ ] Bridge lksdk track RTP <-> frame stream (both directions)
+
+Phase 5–6 — Vendor-neutral plugin interfaces  [ ]
+  [ ] stt/  — Stream API, interim vs final events
+  [ ] tts/  — streamed synthesis, sentence tokenization
+  [ ] llm/  — ChatContext, streaming deltas, tool/function calling
+  [ ] vad/  — speech start/end events + probabilities (Silero via ONNX)
+  [ ] plugins/* — first concrete impls (e.g. deepgram STT, openai LLM/TTS)
+
+Phase 7 — AgentSession / voice pipeline  [ ]   package: voice/   <-- THE ASK
+  [ ] Agent: instructions, tools, node overrides (stt/llm/tts nodes)
+  [ ] AgentSession: session.Start(agent, room), event emission
+  [ ] SpeechHandle: one utterance, interruption unit
+  [ ] audio_recognition: VAD + STT + turn-detection fusion
+  [ ] agent_activity: per-agent pipeline runtime (the hard one)
+  [ ] room_io: bridge session <-> LiveKit room (audio in/out, text)
+  [ ] turn detection / endpointing, preemptive generation
+
+NEXT STEP: Phase 7 (AgentSession) cannot be built directly — it orchestrates
+Phases 4–6. Build order is audio/ -> stt|tts|llm|vad interfaces -> one plugin
+each -> voice/. To prototype the session API sooner, stub the plugin
+interfaces with fakes and wire voice/ against those first.
+================================================================================
+
+
 --------------------------------------------------------------------------------
 STAGE 1 — PLATFORM FUNDAMENTALS (know the ground we stand on)
 --------------------------------------------------------------------------------
