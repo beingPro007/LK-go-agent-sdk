@@ -46,15 +46,33 @@ Phase 3 — CLI  [~]   file: cli/cli.go
   [ ] download-files / plugin warmup hooks
 
 --- NOT STARTED (this is the remaining work) ---------------------------------
-Phase 4 — Audio primitives  [ ]   package: audio/
-  [ ] AudioFrame type, ring buffer, resampling, byte<->sample helpers
-  [ ] Bridge lksdk track RTP <-> frame stream (both directions)
+Phase 4 — Audio primitives  [x]   package: audio/
+  KEY FINDING: server-sdk-go/v2/pkg/media already does the hard part —
+  NewPCMRemoteTrack (RTP->Opus decode->resample->downmix->PCM16 push) and
+  NewPCMLocalTrack (PCM16->Opus encode->publish, w/ WaitForPlayout +
+  ClearQueue). media.PCM16Sample is []int16. We do NOT write a codec.
+  NOTE: pkg/media is CGO — needs libopus-dev, libopusfile-dev, libsoxr-dev.
+  Contained to audio/ and up; the worker/job/cli core stays pure-Go.
+  [x] Frame type + byte<->sample helpers, Duration, Clone (frame.go)
+  [x] Input: PCMRemoteTrack push (WriteSample) -> pull <-chan Frame,
+      non-blocking drop-on-full, race-safe Close (input.go)
+  [x] Output: wraps PCMLocalTrack — CaptureFrame/WaitForPlayout/ClearBuffer,
+      Track() for PublishTrack (output.go)
+  SPLIT: pure Frame stays in package audio (no CGO); CGO adapters moved to
+  package audio/track so stt/tts/plugins ref Frame without pulling libopus.
+  [x] (verify) examples/echo routed through track.Input->Output VERIFIED LIVE
+      2026-07-20: agent auto-dispatched, decoded Opus->PCM->re-encoded Opus,
+      verifier got 1070 echoed RTP packets (ECHO_OK). Docker Desktop needs
+      -p 7880/7881/7882 + `--node-ip 127.0.0.1` (host-net binds the VM).
 
-Phase 5–6 — Vendor-neutral plugin interfaces  [ ]
-  [ ] stt/  — Stream API, interim vs final events
-  [ ] tts/  — streamed synthesis, sentence tokenization
-  [ ] llm/  — ChatContext, streaming deltas, tool/function calling
-  [ ] vad/  — speech start/end events + probabilities (Silero via ONNX)
+Phase 5–6 — Vendor-neutral plugin interfaces  [~]
+  YIELD MODEL: every stream is `Chan() <-chan T` + Err() + Close() — the Go
+  translation of Python async-gen (for x := range s.Chan(); then check Err()).
+  stt/tts/vad streams also PushFrame/PushText + Flush + EndInput (duplex).
+  [x] stt/  — SpeechEvent{Type,Alternatives}, SpeechStream (stt.go)
+  [x] tts/  — SynthesizedAudio{Frame,...}, SynthesizeStream (tts.go)
+  [x] llm/  — ChatContext/Message/Role, ChatChunk delta, Tool, LLMStream (llm.go)
+  [x] vad/  — Event{Type,Speaking,Probability,durations,Frames}, Stream (vad.go)
   [ ] plugins/* — first concrete impls (e.g. deepgram STT, openai LLM/TTS)
 
 Phase 7 — AgentSession / voice pipeline  [ ]   package: voice/   <-- THE ASK

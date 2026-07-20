@@ -2,13 +2,17 @@ package main
 
 import (
 	"log/slog"
-	"time"
 
 	agents "github.com/beingPro007/lk-go-agent-sdk"
+	"github.com/beingPro007/lk-go-agent-sdk/audio/track"
 	"github.com/beingPro007/lk-go-agent-sdk/cli"
 	lksdk "github.com/livekit/server-sdk-go/v2"
 	"github.com/pion/webrtc/v4"
-	"github.com/pion/webrtc/v4/pkg/media"
+)
+
+const (
+	sampleRate = 48000
+	channels   = 1
 )
 
 func main() {
@@ -18,34 +22,30 @@ func main() {
 }
 
 func echo(job *agents.JobContext) error {
-	echoTrack, err := lksdk.NewLocalSampleTrack(webrtc.RTPCodecCapability{
-		MimeType:  webrtc.MimeTypeOpus,
-		ClockRate: 48000,
-		Channels:  2,
-	})
+	out, err := track.NewOutput(sampleRate, channels)
 	if err != nil {
 		return err
 	}
+	defer out.Close()
 
 	cb := lksdk.NewRoomCallback()
-	cb.OnTrackSubscribed = func(track *webrtc.TrackRemote, pub *lksdk.RemoteTrackPublication, rp *lksdk.RemoteParticipant) {
-		if track.Kind() != webrtc.RTPCodecTypeAudio {
+	cb.OnTrackSubscribed = func(remote *webrtc.TrackRemote, pub *lksdk.RemoteTrackPublication, rp *lksdk.RemoteParticipant) {
+		if remote.Kind() != webrtc.RTPCodecTypeAudio {
+			return
+		}
+		in, err := track.NewRemoteTrackInput(remote, sampleRate, channels)
+		if err != nil {
+			slog.Error("failed to open input", "error", err)
 			return
 		}
 		slog.Info("echoing audio track", "from", rp.Identity(), "track", pub.SID())
 		go func() {
-			for {
-				pkt, _, err := track.ReadRTP()
-				if err != nil {
+			defer in.Close()
+			for f := range in.Frames() {
+				if err := out.CaptureFrame(f); err != nil {
+					slog.Error("capture frame failed", "error", err)
 					return
 				}
-				if len(pkt.Payload) == 0 {
-					continue
-				}
-				echoTrack.WriteSample(media.Sample{
-					Data:     pkt.Payload,
-					Duration: 20 * time.Millisecond,
-				}, nil)
 			}
 		}()
 	}
@@ -54,12 +54,12 @@ func echo(job *agents.JobContext) error {
 	if err != nil {
 		return err
 	}
-	if _, err := room.LocalParticipant.PublishTrack(echoTrack, &lksdk.TrackPublicationOptions{
+	if _, err := room.LocalParticipant.PublishTrack(out.Track(), &lksdk.TrackPublicationOptions{
 		Name: "echo",
 	}); err != nil {
 		return err
 	}
-	slog.Info("echo agent ready", "room", room.Name())
+	slog.Info("pcm echo agent ready", "room", room.Name())
 
 	<-job.Done()
 	return nil
