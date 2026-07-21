@@ -6,6 +6,8 @@ import (
 	"github.com/beingPro007/lk-go-agent-sdk/audio"
 )
 
+// A fresh Output exposes a publishable track and accepts a captured frame and a
+// clean Close without error — the minimal happy path before publishing to a room.
 func TestNewOutput(t *testing.T) {
 	out, err := NewOutput(24000, 1)
 	if err != nil {

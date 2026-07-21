@@ -6,6 +6,8 @@ import (
 	"github.com/livekit/media-sdk"
 )
 
+// A pushed PCM16 sample should surface on Frames() as an audio.Frame carrying
+// the configured sample rate/channels and the same sample data.
 func TestInputWriteSampleToFrame(t *testing.T) {
 	in := NewInput(16000, 1, 4)
 	in.WriteSample(media.PCM16Sample{1, 2, 3})
@@ -18,6 +20,8 @@ func TestInputWriteSampleToFrame(t *testing.T) {
 	}
 }
 
+// When the frame buffer is full, WriteSample must drop rather than block or
+// error, so a slow consumer never stalls the RTP decode path.
 func TestInputDropsWhenFull(t *testing.T) {
 	in := NewInput(16000, 1, 1)
 	for i := 0; i < 10; i++ {
@@ -27,6 +31,8 @@ func TestInputDropsWhenFull(t *testing.T) {
 	}
 }
 
+// Close drains buffered frames (range ends), and both double-Close and
+// WriteSample-after-Close must be safe no-ops (no send-on-closed panic).
 func TestInputCloseEndsRange(t *testing.T) {
 	in := NewInput(16000, 1, 4)
 	in.WriteSample(media.PCM16Sample{5})

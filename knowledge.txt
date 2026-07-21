@@ -73,16 +73,51 @@ Phase 5–6 — Vendor-neutral plugin interfaces  [~]
   [x] tts/  — SynthesizedAudio{Frame,...}, SynthesizeStream (tts.go)
   [x] llm/  — ChatContext/Message/Role, ChatChunk delta, Tool, LLMStream (llm.go)
   [x] vad/  — Event{Type,Speaking,Probability,durations,Frames}, Stream (vad.go)
-  [ ] plugins/* — first concrete impls (e.g. deepgram STT, openai LLM/TTS)
+  plugins/* — first concrete impls. Chosen stack: deepgram STT, gemini LLM,
+  cartesia TTS. Each its own Go module (own go.mod + replace ../..), imports
+  only pure audio/stt/tts/llm from core → no CGO, vendor-isolated.
+  [x] plugins/deepgram — STT over WebSocket (nova-3, linear16 PCM push,
+      interim/final/vad_events -> SpeechEvent, KeepAlive, Finalize/CloseStream).
+      Built + unit-tested (JSON->event); live run needs DEEPGRAM_API_KEY.
+  [x] plugins/gemini — LLM via official google.golang.org/genai SDK
+      (gemini-2.0-flash, GenerateContentStream iter.Seq2, System/user/model role
+      xlate, functionCall<->ToolCall, JSON-schema->genai.Schema). Built +
+      unit-tested (offline translation); live run needs GEMINI_API_KEY.
+  [x] plugins/cartesia — TTS over WebSocket, STREAMING model (sonic-2,
+      context_id + continue:true streams tokens as they arrive; Flush sends
+      continue:false + rotates ctx; base64 pcm_s16le chunk -> audio.FromBytes
+      -> SynthesizedAudio). Built + unit-tested; live run needs CARTESIA_API_KEY.
+  [x] plugins/silero — VAD via ONNX (chose the HEAVY option, not deferred).
+      Silero v5 model go:embed'd (2.3MB), yalue/onnxruntime_go v1.20.0 (CGO).
+      Needs ONNX Runtime .so at runtime (WithLibraryPath/ONNXRUNTIME_LIB_PATH);
+      binding v1.20.0 wants ORT API v22 -> use ORT >=1.22.0 (1.20.1 too old).
+      512-sample windows @16k, LSTM state ping-pong, detector state machine
+      (threshold + min speech/silence hangover) -> vad.Event. Detector unit-
+      tested; full plugin smoke-tested through real ONNX (93 windows on silence,
+      prob 0.0006, no false trigger). Live speech-trigger test still pending.
 
-Phase 7 — AgentSession / voice pipeline  [ ]   package: voice/   <-- THE ASK
-  [ ] Agent: instructions, tools, node overrides (stt/llm/tts nodes)
-  [ ] AgentSession: session.Start(agent, room), event emission
-  [ ] SpeechHandle: one utterance, interruption unit
-  [ ] audio_recognition: VAD + STT + turn-detection fusion
-  [ ] agent_activity: per-agent pipeline runtime (the hard one)
-  [ ] room_io: bridge session <-> LiveKit room (audio in/out, text)
-  [ ] turn detection / endpointing, preemptive generation
+Phase 6 COMPLETE (all 4 plugins built + tested offline). Next: Phase 7 voice/.
+
+Phase 7 — AgentSession / voice pipeline  [~]   package: voice/   <-- THE ASK
+  Built against the stt/tts/llm/vad INTERFACES, so the whole orchestrator is
+  unit-tested with FAKE plugins (no API keys / no CGO). Full turn verified.
+  [x] io.go — AudioInput/AudioOutput interfaces (audio/track satisfies them)
+  [x] agent.go — Agent{Instructions, Tools}
+  [x] events.go — AgentState + Event types, Events() <-chan yield
+  [x] session.go — AgentSession: WithSTT/LLM/TTS/VAD, Start(ctx,agent,in,out),
+      the orchestration loop (input fan-out -> STT+VAD; STT turn-end -> generate;
+      LLM deltas -> TTS.PushText -> Output.CaptureFrame), barge-in via VAD
+      StartOfSpeech -> cancel gen + Output.ClearBuffer, ChatContext accumulation
+  [x] session_test.go — fakes for all 4 plugins + in/out; TestFullTurn passes
+  [x] room_io.go — RunRoomSession(job, session, agent): wires OnTrackSubscribed
+      -> track.NewRemoteTrackInput(16k) as AudioInput, publishes track.NewOutput
+      (rate from tts.SampleRate()) as AudioOutput, then session.Start.
+  [x] examples/voiceagent — FULL agent in ~60 lines: cli.Run + NewAgentSession
+      (deepgram+gemini+cartesia+silero) + RunRoomSession. Own module (avoids
+      root<->plugins module cycle). BUILDS end-to-end (CGO).
+  [ ] VAD-interruption test (barge-in path coded but not yet unit-tested)
+  [ ] live end-to-end against real room + real plugins (keys in .env, gitignored)
+  [ ] later: SpeechHandle abstraction, node override hooks, preemptive gen
 
 NEXT STEP: Phase 7 (AgentSession) cannot be built directly — it orchestrates
 Phases 4–6. Build order is audio/ -> stt|tts|llm|vad interfaces -> one plugin
